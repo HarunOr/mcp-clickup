@@ -195,8 +195,22 @@ export function createHandlers(client: ClickUpClient) {
     args: z.infer<typeof getTaskInput>,
   ): Promise<ToolResult> {
     return withErrorHandling(async () => {
-      const task = await client.getTask(args.task_id);
-      return formatToolResponse(summarizeTask(task));
+      const includeComments = args.include_comments ?? true;
+      // Fetch task and comments in parallel — comments come from a separate
+      // ClickUp endpoint, but a fresh agent calling get_task expects them
+      // inline (the tool description promises them). Comment-fetch failure
+      // does not block the task fetch.
+      const [task, commentsResp] = await Promise.all([
+        client.getTask(args.task_id),
+        includeComments
+          ? client.getTaskComments(args.task_id).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+      const summarized = summarizeTask(task);
+      return formatToolResponse({
+        ...summarized,
+        comments: commentsResp ? commentsResp.comments.map(summarizeComment) : undefined,
+      });
     });
   }
 
@@ -292,18 +306,7 @@ export function createHandlers(client: ClickUpClient) {
     return withErrorHandling(async () => {
       const response = await client.getTaskComments(args.task_id);
       return formatToolResponse({
-        comments: response.comments.map((c) => ({
-          id: c.id,
-          text: c.comment_text,
-          user: c.user
-            ? {
-                id: (c.user as Record<string, unknown>).id,
-                username: (c.user as Record<string, unknown>).username,
-              }
-            : null,
-          date: c.date,
-          resolved: c.resolved,
-        })),
+        comments: response.comments.map(summarizeComment),
       });
     });
   }
@@ -409,6 +412,27 @@ export function createHandlers(client: ClickUpClient) {
 // ---------------------------------------------------------------------------
 // Task serialization helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Shape a single comment from the ClickUp API response into the structure
+ * surfaced to clients. Used by both get_task (when comments are inlined) and
+ * get_task_comments — keep them in lockstep so callers see the same fields
+ * regardless of which entry point they used.
+ */
+function summarizeComment(c: Record<string, unknown>) {
+  return {
+    id: c.id,
+    text: c.comment_text,
+    user: c.user
+      ? {
+          id: (c.user as Record<string, unknown>).id,
+          username: (c.user as Record<string, unknown>).username,
+        }
+      : null,
+    date: c.date,
+    resolved: c.resolved,
+  };
+}
 
 /** Full task detail (for get_task, create_task, update_task) */
 function summarizeTask(task: Record<string, unknown>) {

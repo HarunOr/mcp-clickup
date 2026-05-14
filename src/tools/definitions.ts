@@ -107,10 +107,11 @@ export const toolDefinitions = [
   {
     name: "clickup_get_task",
     description:
-      "Get full details of a single task — name, status, assignees, description, comments, custom fields, checklists. " +
-      "USE THIS WHEN: you know a task ID and need its details. " +
+      "Get full details of a single task — name, status, assignees, description, custom fields, checklists, AND inlined comments (newest first). " +
+      "USE THIS WHEN: you know a task ID and need its details. The inlined comments mean you usually do NOT need a separate clickup_get_task_comments call. " +
       "DO NOT USE: to list multiple tasks (use clickup_list_tasks or clickup_search_tasks). " +
-      "NOTE: Task IDs in ClickUp UI have a '#' prefix (e.g. #8ckjp5) — pass just '8ckjp5' to this tool.",
+      "NOTE: Task IDs in ClickUp UI have a '#' prefix (e.g. #8ckjp5) — pass just '8ckjp5' to this tool. " +
+      "Pass include_comments=false on tasks with very long comment threads when you only need task fields.",
     inputSchema: getTaskInput,
     annotations: {
       readOnlyHint: true,

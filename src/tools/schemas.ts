@@ -56,6 +56,12 @@ export const getTaskInput = z.object({
   task_id: z
     .string()
     .describe("The task ID (e.g. '8ckjp5' — without the '#' prefix shown in ClickUp UI)."),
+  include_comments: z
+    .boolean()
+    .optional()
+    .describe(
+      "Whether to fetch and inline the task's comments alongside the task details. Default true. Set false for very long comment threads when you only need task fields.",
+    ),
 });
 
 export const listTasksInput = z.object({

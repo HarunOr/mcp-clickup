@@ -282,12 +282,23 @@ describe("getList", () => {
 // ===========================================================================
 
 describe("getTask", () => {
+  // Default empty-comments mock for tests that don't care about comments. Keeps
+  // MSW quiet — getTask now fetches comments in parallel by default.
+  function mockEmptyComments() {
+    mockServer.use(
+      http.get(`${BASE_URL}/task/:taskId/comment`, () =>
+        HttpResponse.json({ comments: [] }),
+      ),
+    );
+  }
+
   it("returns full task details with correct field mapping", async () => {
     mockServer.use(
       http.get(`${BASE_URL}/task/:taskId`, () =>
         HttpResponse.json(makeTask()),
       ),
     );
+    mockEmptyComments();
 
     const result = await makeHandlers().getTask({ task_id: "abc123" });
     const data = parseContent(result) as Record<string, unknown>;
@@ -307,6 +318,7 @@ describe("getTask", () => {
         HttpResponse.json(makeTask()),
       ),
     );
+    mockEmptyComments();
 
     const result = await makeHandlers().getTask({ task_id: "abc123" });
     const data = parseContent(result) as Record<string, unknown>;
@@ -325,6 +337,7 @@ describe("getTask", () => {
         HttpResponse.json(makeTask()),
       ),
     );
+    mockEmptyComments();
 
     const result = await makeHandlers().getTask({ task_id: "abc123" });
     const data = parseContent(result) as Record<string, unknown>;
@@ -342,10 +355,93 @@ describe("getTask", () => {
         HttpResponse.json({ err: "Task not found" }, { status: 404 }),
       ),
     );
+    mockEmptyComments();
 
     const result = await makeHandlers().getTask({ task_id: "nonexistent" });
     expect((result as { isError?: boolean }).isError).toBe(true);
     expect(result.content[0].text).toContain("not found");
+  });
+
+  it("inlines comments in the task response by default", async () => {
+    mockServer.use(
+      http.get(`${BASE_URL}/task/:taskId`, () =>
+        HttpResponse.json(makeTask()),
+      ),
+      http.get(`${BASE_URL}/task/:taskId/comment`, () =>
+        HttpResponse.json({
+          comments: [
+            {
+              id: "c1",
+              comment_text: "Latest update",
+              user: { id: 1, username: "alice" },
+              date: "1700000000000",
+              resolved: false,
+            },
+            {
+              id: "c2",
+              comment_text: "Earlier note",
+              user: null,
+              date: "1699000000000",
+              resolved: true,
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await makeHandlers().getTask({ task_id: "abc123" });
+    const data = parseContent(result) as Record<string, unknown>;
+    const comments = data.comments as Array<Record<string, unknown>>;
+
+    expect(comments).toHaveLength(2);
+    expect(comments[0].text).toBe("Latest update");
+    expect((comments[0].user as Record<string, unknown>).username).toBe("alice");
+    expect(comments[1].user).toBeNull();
+    expect(comments[1].resolved).toBe(true);
+  });
+
+  it("skips fetching comments when include_comments=false", async () => {
+    let commentEndpointHit = false;
+    mockServer.use(
+      http.get(`${BASE_URL}/task/:taskId`, () =>
+        HttpResponse.json(makeTask()),
+      ),
+      http.get(`${BASE_URL}/task/:taskId/comment`, () => {
+        commentEndpointHit = true;
+        return HttpResponse.json({ comments: [] });
+      }),
+    );
+
+    const result = await makeHandlers().getTask({
+      task_id: "abc123",
+      include_comments: false,
+    });
+    const data = parseContent(result) as Record<string, unknown>;
+
+    expect(commentEndpointHit).toBe(false);
+    expect(data.comments).toBeUndefined();
+    // Task fields still resolve normally.
+    expect(data.id).toBe("abc123");
+  });
+
+  it("still returns task data when comment fetch fails", async () => {
+    mockServer.use(
+      http.get(`${BASE_URL}/task/:taskId`, () =>
+        HttpResponse.json(makeTask()),
+      ),
+      http.get(`${BASE_URL}/task/:taskId/comment`, () =>
+        HttpResponse.json({ err: "Comments service down" }, { status: 503 }),
+      ),
+    );
+
+    const result = await makeHandlers().getTask({ task_id: "abc123" });
+    const data = parseContent(result) as Record<string, unknown>;
+
+    expect((result as { isError?: boolean }).isError).toBeFalsy();
+    expect(data.id).toBe("abc123");
+    // Comments key is omitted (undefined) when the fetch failed — caller can
+    // still retry with clickup_get_task_comments to surface the underlying error.
+    expect(data.comments).toBeUndefined();
   });
 });
 
